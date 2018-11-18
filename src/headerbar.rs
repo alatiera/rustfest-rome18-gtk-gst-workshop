@@ -52,7 +52,22 @@ impl Default for HeaderBar {
 }
 
 impl HeaderBar {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(app: &gtk::ApplicationWindow) -> Self {
+        let h = Self::default();
+        h.init(app);
+        h
+    }
+
+    pub fn init(&self, app: &gtk::ApplicationWindow) {
+        self.on_record_clicked();
+        self.on_snapshot_clicked();
+    }
+
+    fn on_record_clicked(&self) {
+        unimplemented!()
+    }
+
+    fn on_snapshot_clicked(&self) {
+        unimplemented!()
     }
 }

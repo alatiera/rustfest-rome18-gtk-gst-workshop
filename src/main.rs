@@ -361,7 +361,7 @@ impl App {
 
         // Create headerbar for the application, including the main
         // menu and a close button
-        let header_bar = headerbar::HeaderBar::new();
+        let header_bar = headerbar::HeaderBar::default();
         // FIXME: these should not be needed
         let snapshot_button = &header_bar.snapshot;
         let record_button = &header_bar.record;
