@@ -375,11 +375,11 @@ impl App {
         main_menu.set_menu_model(&main_menu_model);
 
         let snapshot_button = gtk::ToggleButton::new();
-        let snapshot_button_image = gtk::Image::new_from_icon_name("camera-photo", 1);
+        let snapshot_button_image = gtk::Image::new_from_icon_name("camera-photo-symbolic", 1);
         snapshot_button.add(&snapshot_button_image);
 
         let record_button = gtk::ToggleButton::new();
-        let record_button_image = gtk::Image::new_from_icon_name("media-record", 1);
+        let record_button_image = gtk::Image::new_from_icon_name("media-record-symbolic", 1);
         record_button.add(&record_button_image);
 
         // Pack the snapshot/record buttons on the left, the main menu on
