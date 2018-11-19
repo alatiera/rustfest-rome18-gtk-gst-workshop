@@ -2,6 +2,8 @@ use gtk::prelude::*;
 use gst::prelude::*;
 use gio::prelude::*;
 
+use gst::BinExt;
+
 use utils;
 use headerbar;
 use overlay::Overlay;
@@ -9,6 +11,7 @@ use settings::SettingsDialog;
 
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
+use std::error;
 
 use gst;
 
@@ -189,7 +192,7 @@ impl App {
             // app methods
             drop(inner);
 
-            self.take_snapshot();
+            self.0.borrow().take_snapshot();
         } else {
             // Make the overlay visible, remember how much we have to count
             // down and start our timeout for the timer
@@ -228,7 +231,7 @@ impl App {
                     // app methods
                     drop(inner);
 
-                    app.take_snapshot();
+                    app.0.borrow().take_snapshot();
                     glib::Continue(false)
                 } else {
                     glib::Continue(true)
@@ -243,9 +246,9 @@ impl App {
     fn on_record_button_clicked(&self, record_button: &gtk::ToggleButton) {
         // Start/stop recording based on button active'ness
         if record_button.get_active() {
-            self.start_recording(record_button);
+            self.0.borrow().start_recording(record_button);
         } else {
-            self.stop_recording();
+            self.0.borrow().stop_recording();
         }
     }
 
@@ -310,5 +313,59 @@ impl App {
         // FIXME: Make this a method
         overlay.content.pack_start(&view, true, true, 0);
         window.add(&overlay.container);
+    }
+
+    fn create_pipeline(&self) -> Result<(gst::Pipeline, gtk::Widget), Box<dyn error::Error>> {
+        // Create a new GStreamer pipeline that captures from the default video source,
+        // which is usually a camera, converts the output to RGB if needed and then passes
+        // it to a GTK video sink
+        let pipeline = gst::parse_launch(
+            "autovideosrc ! tee name=tee ! queue ! videoconvert ! gtksink name=sink",
+        )?;
+
+        // Upcast to a gst::Pipeline as the above function could've also returned
+        // an arbitrary gst::Element if a different string was passed
+        let pipeline = pipeline
+            .downcast::<gst::Pipeline>()
+            .expect("Couldn't downcast pipeline");
+
+        // Request that the pipeline forwards us all messages, even those that it would otherwise
+        // aggregate first
+        pipeline.set_property_message_forward(true);
+
+        // Install a message handler on the pipeline's bus to catch errors
+        let bus = pipeline.get_bus().expect("Pipeline had no bus");
+
+        // GStreamer is thread-safe and it is possible to attach
+        // bus watches from any thread, which are then nonetheless
+        // called from the main thread. As such we have to make use
+        // of fragile::Fragile() here to be able to pass our non-Send
+        // application struct into a closure that requires Send.
+        //
+        // As we are on the main thread and the closure will be called
+        // on the main thread, this will not cause a panic and is perfectly
+        // safe.
+        let app_weak = fragile::Fragile::new(self.downgrade());
+        bus.add_watch(move |_bus, msg| {
+            let app_weak = app_weak.get();
+            let app = upgrade_weak!(app_weak, glib::Continue(false));
+
+            app.0.borrow().on_pipeline_message(msg);
+
+            glib::Continue(true)
+        });
+
+        // Get the GTK video sink and retrieve the video display widget from it
+        let sink = pipeline
+            .get_by_name("sink")
+            .expect("Pipeline had no sink element");
+        let widget_value = sink
+            .get_property("widget")
+            .expect("Sink had no widget property");
+        let widget = widget_value
+            .get::<gtk::Widget>()
+            .expect("Sink's widget propery was of the wrong type");
+
+        Ok((pipeline, widget))
     }
 }

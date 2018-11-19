@@ -1,4 +1,4 @@
-use App;
+use app::AppInner;
 use settings::RecordFormat;
 use settings::SnapshotFormat;
 
@@ -15,20 +15,19 @@ use gst::BinExt;
 use gst::MessageView;
 use gst_video;
 
-use std::error;
 use std::fs::File;
 
-impl App {
+impl AppInner {
     // Here we handle all message we get from the GStreamer pipeline. These are
     // notifications sent from GStreamer, including errors that happend at
     // runtime.
-    fn on_pipeline_message(&self, msg: &gst::MessageRef) {
+    pub fn on_pipeline_message(&self, msg: &gst::MessageRef) {
         // A message can contain various kinds of information but
         // here we are only interested in errors so far
         match msg.view() {
             MessageView::Error(err) => {
                 show_error_dialog(
-                    self.0.borrow().main_window.as_ref(),
+                    self.main_window.as_ref(),
                     true,
                     format!(
                         "Error from {:?}: {} ({:?})",
@@ -44,7 +43,7 @@ impl App {
                 // to the user in the UI in case something goes wrong
                 Some(s) if s.get_name() == "warning" => {
                     let text = s.get::<&str>("text").expect("Warning message without text");
-                    show_error_dialog(self.0.borrow().main_window.as_ref(), false, text);
+                    show_error_dialog(self.main_window.as_ref(), false, text);
                 }
                 _ => (),
             },
@@ -64,10 +63,8 @@ impl App {
                             .expect("Failed to get forwarded message");
 
                         if let MessageView::Eos(..) = msg.view() {
-                            let inner = self.0.borrow();
-
                             // Get our pipeline and the recording bin
-                            let pipeline = match inner.pipeline {
+                            let pipeline = match self.pipeline {
                                 Some(ref pipeline) => pipeline.clone(),
                                 None => return,
                             };
@@ -109,63 +106,9 @@ impl App {
         };
     }
 
-    pub fn create_pipeline(&self) -> Result<(gst::Pipeline, gtk::Widget), Box<dyn error::Error>> {
-        // Create a new GStreamer pipeline that captures from the default video source,
-        // which is usually a camera, converts the output to RGB if needed and then passes
-        // it to a GTK video sink
-        let pipeline = gst::parse_launch(
-            "autovideosrc ! tee name=tee ! queue ! videoconvert ! gtksink name=sink",
-        )?;
-
-        // Upcast to a gst::Pipeline as the above function could've also returned
-        // an arbitrary gst::Element if a different string was passed
-        let pipeline = pipeline
-            .downcast::<gst::Pipeline>()
-            .expect("Couldn't downcast pipeline");
-
-        // Request that the pipeline forwards us all messages, even those that it would otherwise
-        // aggregate first
-        pipeline.set_property_message_forward(true);
-
-        // Install a message handler on the pipeline's bus to catch errors
-        let bus = pipeline.get_bus().expect("Pipeline had no bus");
-
-        // GStreamer is thread-safe and it is possible to attach
-        // bus watches from any thread, which are then nonetheless
-        // called from the main thread. As such we have to make use
-        // of fragile::Fragile() here to be able to pass our non-Send
-        // application struct into a closure that requires Send.
-        //
-        // As we are on the main thread and the closure will be called
-        // on the main thread, this will not cause a panic and is perfectly
-        // safe.
-        let app_weak = fragile::Fragile::new(self.downgrade());
-        bus.add_watch(move |_bus, msg| {
-            let app_weak = app_weak.get();
-            let app = upgrade_weak!(app_weak, glib::Continue(false));
-
-            app.on_pipeline_message(msg);
-
-            glib::Continue(true)
-        });
-
-        // Get the GTK video sink and retrieve the video display widget from it
-        let sink = pipeline
-            .get_by_name("sink")
-            .expect("Pipeline had no sink element");
-        let widget_value = sink
-            .get_property("widget")
-            .expect("Sink had no widget property");
-        let widget = widget_value
-            .get::<gtk::Widget>()
-            .expect("Sink's widget propery was of the wrong type");
-
-        Ok((pipeline, widget))
-    }
-
     pub fn start_recording(&self, record_button: &gtk::ToggleButton) {
         // If we have no pipeline (can't really happen) just return
-        let pipeline = match self.0.borrow().pipeline {
+        let pipeline = match self.pipeline {
             Some(ref pipeline) => pipeline.clone(),
             None => return,
         };
@@ -190,7 +133,7 @@ impl App {
         let bin = match gst::parse_bin_from_description(bin_description, true) {
             Err(err) => {
                 show_error_dialog(
-                    self.0.borrow().main_window.as_ref(),
+                    self.main_window.as_ref(),
                     false,
                     format!("Failed to create recording pipeline: {}", err).as_str(),
                 );
@@ -221,7 +164,7 @@ impl App {
         // part of the pipeline
         if let Err(_) = bin.set_state(gst::State::Playing).into_result() {
             show_error_dialog(
-                self.0.borrow().main_window.as_ref(),
+                self.main_window.as_ref(),
                 false,
                 "Failed to start recording",
             );
@@ -247,7 +190,7 @@ impl App {
         // If linking fails, we just undo what we did above
         if let Err(err) = srcpad.link(&sinkpad).into_result() {
             show_error_dialog(
-                self.0.borrow().main_window.as_ref(),
+                self.main_window.as_ref(),
                 false,
                 format!("Failed to link recording bin: {}", err).as_str(),
             );
@@ -261,7 +204,7 @@ impl App {
 
     pub fn stop_recording(&self) {
         // If we have no pipeline (can't really happen) just return
-        let pipeline = match self.0.borrow().pipeline {
+        let pipeline = match self.pipeline {
             Some(ref pipeline) => pipeline.clone(),
             None => return,
         };
@@ -326,7 +269,7 @@ impl App {
         let settings = load_settings();
 
         // If we have no pipeline there's nothing to snapshot
-        let pipeline = match self.0.borrow().pipeline {
+        let pipeline = match self.pipeline {
             None => return,
             Some(ref pipeline) => pipeline.clone(),
         };
@@ -361,7 +304,7 @@ impl App {
         let mut file = match File::create(&filename) {
             Err(err) => {
                 show_error_dialog(
-                    self.0.borrow().main_window.as_ref(),
+                    self.main_window.as_ref(),
                     false,
                     format!(
                         "Failed to create snapshot file {}: {}",
@@ -422,3 +365,4 @@ impl App {
         });
     }
 }
+
