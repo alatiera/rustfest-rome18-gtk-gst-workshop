@@ -4,11 +4,11 @@ use gio::prelude::*;
 
 use utils;
 use headerbar;
+use settings::{RecordFormat, SnapshotFormat};
 
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
 use std::fs::create_dir_all;
-use types::{RecordFormat, SnapshotFormat};
 
 use gst;
 
