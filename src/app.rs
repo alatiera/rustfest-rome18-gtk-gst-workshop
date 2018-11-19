@@ -1,19 +1,19 @@
-use gtk::prelude::*;
-use gst::prelude::*;
 use gio::prelude::*;
+use gst::prelude::*;
+use gtk::prelude::*;
 
-use gst::BinExt;
-
-use utils;
 use headerbar;
 use overlay::Overlay;
 use settings::SettingsDialog;
+use utils;
 
-use std::rc::{Rc, Weak};
 use std::cell::RefCell;
 use std::error;
+use std::rc::{Rc, Weak};
 
-use gst;
+use gst::{self, BinExt};
+
+use super::gstreamer::*;
 
 // Our refcounted application struct for containing all the
 // state we have to carry around
@@ -192,7 +192,10 @@ impl App {
             // app methods
             drop(inner);
 
-            self.0.borrow().take_snapshot();
+            let inner = self.0.borrow();
+            let pipeline = inner.pipeline.clone();
+            let window = inner.main_window.clone();
+            take_snapshot(pipeline, window);
         } else {
             // Make the overlay visible, remember how much we have to count
             // down and start our timeout for the timer
@@ -231,7 +234,11 @@ impl App {
                     // app methods
                     drop(inner);
 
-                    app.0.borrow().take_snapshot();
+                    let inner = app.0.borrow();
+                    let pipeline = inner.pipeline.clone();
+                    let window = inner.main_window.clone();
+                    take_snapshot(pipeline, window);
+
                     glib::Continue(false)
                 } else {
                     glib::Continue(true)
@@ -246,9 +253,14 @@ impl App {
     fn on_record_button_clicked(&self, record_button: &gtk::ToggleButton) {
         // Start/stop recording based on button active'ness
         if record_button.get_active() {
-            self.0.borrow().start_recording(record_button);
+            let inner = self.0.borrow();
+            let pipeline = inner.pipeline.clone();
+            let window = inner.main_window.clone();
+            start_recording(record_button, pipeline, window);
         } else {
-            self.0.borrow().stop_recording();
+            let inner = self.0.borrow();
+            let pipeline = inner.pipeline.clone();
+            stop_recording(pipeline);
         }
     }
 
@@ -350,7 +362,10 @@ impl App {
             let app_weak = app_weak.get();
             let app = upgrade_weak!(app_weak, glib::Continue(false));
 
-            app.0.borrow().on_pipeline_message(msg);
+            let inner = app.0.borrow();
+            let pipeline = inner.pipeline.clone();
+            let window = inner.main_window.clone();
+            on_pipeline_message(msg, pipeline, window);
 
             glib::Continue(true)
         });
