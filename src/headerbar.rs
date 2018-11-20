@@ -1,6 +1,7 @@
 use gio::{self, MenuExt};
 use gtk::{self, prelude::*};
 
+#[derive(Clone, Debug)]
 pub struct HeaderBar {
     pub container: gtk::HeaderBar,
     menu: gtk::MenuButton,

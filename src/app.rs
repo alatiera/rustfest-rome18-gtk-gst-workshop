@@ -3,9 +3,10 @@ use gst::prelude::*;
 use gio::prelude::*;
 
 use utils;
-use headerbar;
+use headerbar::HeaderBar;
 use overlay::Overlay;
 use settings::SettingsDialog;
+use super::gstreamer::*;
 
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
@@ -26,12 +27,51 @@ impl AppWeak {
 }
 
 pub struct AppInner {
+    pub instance: gtk::Application,
+    pub window: gtk::ApplicationWindow,
+    pub headerbar: HeaderBar,
+    pub overlay: Overlay,
     pub main_window: Option<gtk::ApplicationWindow>,
     pub pipeline: Option<gst::Pipeline>,
 
     // Snapshot timer state
     pub timeout: Option<glib::source::SourceId>,
     pub remaining_secs_before_snapshot: u32,
+}
+
+impl AppInner {
+    fn new(application: &gtk::Application) -> Self {
+        let window = gtk::ApplicationWindow::new(application);
+
+        window.set_title("RustFest 2018 GTK+ & GStreamer WebCam Viewer");
+        window.set_border_width(5);
+        window.set_position(gtk::WindowPosition::Center);
+        window.set_default_size(350, 300);
+
+        // Create headerbar for the application, including the main
+        // menu and a close button
+        let headerbar = HeaderBar::default();
+
+        // Pack the snapshot/record buttons on the left, the main menu on
+        // the right of the header bar and set it on our window
+        window.set_titlebar(&headerbar.container);
+
+        // Create an overlay for showing the seconds until a snapshot
+        // This is hidden while we're not doing a countdown
+        let overlay = Overlay::default();
+
+        window.add(&overlay.container);
+        AppInner {
+            instance: application.clone(),
+            window,
+            headerbar,
+            overlay,
+            main_window: None,
+            pipeline: None,
+            timeout: None,
+            remaining_secs_before_snapshot: 0,
+        }
+    }
 }
 
 // Here we specify our custom, application specific CSS styles for various widgets
@@ -44,13 +84,8 @@ const STYLE: &'static str = "
 }";
 
 impl App {
-    pub fn new() -> App {
-        App(Rc::new(RefCell::new(AppInner {
-            main_window: None,
-            pipeline: None,
-            timeout: None,
-            remaining_secs_before_snapshot: 0,
-        })))
+    pub fn new(application: &gtk::Application) -> App {
+        App(Rc::new(RefCell::new(AppInner::new(application))))
     }
 
     pub fn downgrade(&self) -> AppWeak {
@@ -70,13 +105,13 @@ impl App {
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
 
-        let app = App::new();
+        let app = App::new(application);
 
         // Create our UI actions
         app.connect_actions(application);
 
         // Build the UI but don't show it yet
-        app.build_ui(application);
+        app.build_ui();
 
         // When the application is activated show the UI. This happens
         // when the first process is started, and in the first process
@@ -264,7 +299,8 @@ impl App {
     }
 
     // When the record button is clicked, we have to start or stop recording
-    fn on_record_button_clicked(&self, record_button: &gtk::ToggleButton) {
+    fn on_record_button_clicked(&self) {
+        let record_button = &self.0.borrow().headerbar.record;
         // Start/stop recording based on button active'ness
         if record_button.get_active() {
             self.start_recording(record_button);
@@ -273,30 +309,20 @@ impl App {
         }
     }
 
-    fn build_ui(&self, application: &gtk::Application) {
-        let window = gtk::ApplicationWindow::new(application);
-        self.0.borrow_mut().main_window = Some(window.clone());
+    fn build_ui(&self) {
+        let mut inner = self.0.borrow_mut();
+        // Just a shim for now
+        inner.main_window = Some(inner.window.clone());
+        drop(inner);
 
-        window.set_title("RustFest 2018 GTK+ & GStreamer WebCam Viewer");
-        window.set_border_width(5);
-        window.set_position(gtk::WindowPosition::Center);
-        window.set_default_size(350, 300);
-
-        // Create headerbar for the application, including the main
-        // menu and a close button
-        let header_bar = headerbar::HeaderBar::default();
         // FIXME: these should not be needed
-        let snapshot_button = &header_bar.snapshot;
-        let record_button = &header_bar.record;
-
-        // Pack the snapshot/record buttons on the left, the main menu on
-        // the right of the header bar and set it on our window
-        window.set_titlebar(&header_bar.container);
-
-        // Create an overlay for showing the seconds until a snapshot
-        // This is hidden while we're not doing a countdown
-        let overlay = Overlay::default();
+        let inner = self.0.borrow();
+        let snapshot_button = &inner.headerbar.snapshot.clone();
+        let record_button = &inner.headerbar.record.clone();
+        let overlay = &inner.overlay.clone();
         let overlay_text = overlay.label.clone();
+        let window = &inner.window.clone();
+        drop(inner);
 
         // When the snapshot button is clicked we need to start the
         // countdown, stop the countdown or directly do a snapshot
@@ -309,17 +335,17 @@ impl App {
         // When the record button is clicked we need to start or stop
         // recording based on its state
         let app_weak = self.downgrade();
-        record_button.connect_clicked(move |record_button| {
+        record_button.connect_clicked(move |_| {
             let app = upgrade_weak!(app_weak);
-            app.on_record_button_clicked(&record_button);
+            app.on_record_button_clicked();
         });
 
         // Create the pipeline and if that fails, shut down and
         // remember the error that happened
-        let (pipeline, view) = match self.create_pipeline() {
+        let (pipeline, view) = match create_pipeline(&window) {
             Err(err) => {
                 utils::show_error_dialog(
-                    Some(&window),
+                    Some(window),
                     true,
                     format!("Error creating pipeline: {:?}", err).as_str(),
                 );
@@ -328,11 +354,11 @@ impl App {
             Ok(res) => res,
         };
 
+        let mut inner = self.0.borrow_mut();
         // Store the pipeline for later usage and add the view widget
         // to the UI
-        self.0.borrow_mut().pipeline = Some(pipeline);
+        inner.pipeline = Some(pipeline);
         // FIXME: Make this a method
-        overlay.content.pack_start(&view, true, true, 0);
-        window.add(&overlay.container);
+        inner.overlay.content.pack_start(&view, true, true, 0);
     }
 }

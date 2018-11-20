@@ -1,5 +1,6 @@
 use gtk::{self, prelude::*};
 
+#[derive(Clone, Debug)]
 pub struct Overlay {
     // Our overlay widget
     pub container: gtk::Overlay,
