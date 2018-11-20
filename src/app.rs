@@ -78,6 +78,23 @@ impl App {
 
         // Build the UI but don't show it yet
         self.build_ui(application);
+
+        // When the application is activated show the UI. This happens
+        // when the first process is started, and in the first process
+        // whenever a second process is started
+        let app_weak = self.downgrade();
+        application.connect_activate(move |_| {
+            let app = upgrade_weak!(app_weak);
+            app.on_activate();
+        });
+
+        // When the application is shut down, first shut down
+        // the GStreamer pipeline so that capturing can gracefully stop
+        let app_weak = self.downgrade();
+        application.connect_shutdown(move |_| {
+            let app = upgrade_weak!(app_weak);
+            app.on_shutdown();
+        });
     }
 
     pub fn on_activate(&self) {

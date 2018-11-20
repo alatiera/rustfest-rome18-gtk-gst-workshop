@@ -47,23 +47,6 @@ fn main() -> Result<(), Box<dyn error::Error>> {
         app.on_startup(application);
     });
 
-    // When the application is activated show the UI. This happens
-    // when the first process is started, and in the first process
-    // whenever a second process is started
-    let app_weak = app.downgrade();
-    application.connect_activate(move |_| {
-        let app = upgrade_weak!(app_weak);
-        app.on_activate();
-    });
-
-    // When the application is shut down, first shut down
-    // the GStreamer pipeline so that capturing can gracefully stop
-    let app_weak = app.downgrade();
-    application.connect_shutdown(move |_| {
-        let app = upgrade_weak!(app_weak);
-        app.on_shutdown();
-    });
-
     // And now run the application until the end
     application.run(&args().collect::<Vec<_>>());
 
