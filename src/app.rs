@@ -58,7 +58,7 @@ impl App {
         AppWeak(Rc::downgrade(&self.0))
     }
 
-    pub fn on_startup(&self, application: &gtk::Application) {
+    pub fn on_startup(application: &gtk::Application) {
         // Load our custom CSS style-sheet and set it as the application
         // specific style-sheet for this whole application
         let provider = gtk::CssProvider::new();
@@ -71,11 +71,35 @@ impl App {
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
 
+        let app = App::new();
+
         // Create our UI actions
-        self.connect_actions(application);
+        app.connect_actions(application);
 
         // Build the UI but don't show it yet
-        self.build_ui(application);
+        app.build_ui(application);
+
+        // When the application is activated show the UI. This happens
+        // when the first process is started, and in the first process
+        // whenever a second process is started
+        let app_weak = app.downgrade();
+        application.connect_activate(move |_| {
+            let app = upgrade_weak!(app_weak);
+            app.on_activate();
+        });
+
+        // When the application is shut down, first shut down
+        // the GStreamer pipeline so that capturing can gracefully stop
+        // We pass a strong reference to the shutdown callback to ensure
+        // that our Rust struct that holds the Pipeline will leave long
+        // enough. Once we are done, we free the last strong reference
+        // and the application exits.
+        let graceful_shutdonw = RefCell::new(Some(app));
+        application.connect_shutdown(move |_| {
+            let app = graceful_shutdonw.borrow_mut().take();
+            debug_assert!(app.is_some());
+            app.map(App::on_shutdown);
+        });
     }
 
     pub fn on_activate(&self) {
@@ -101,7 +125,7 @@ impl App {
         }
     }
 
-    pub fn on_shutdown(&self) {
+    pub fn on_shutdown(self) {
         if let Some(ref pipeline) = self.0.borrow().pipeline {
             // This might fail but as we shut down right now anyway this
             // doesn't matter
